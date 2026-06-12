@@ -97,14 +97,6 @@ DynamixelDriver::DynamixelDriver() : portHandler_(nullptr),
 
 DynamixelDriver::~DynamixelDriver()
 { 
-  for (int i = 0; i < tools_cnt_; i++)
-  {
-    for (int j = 0; j < tools_[i].getDynamixelCount(); j++)
-    {
-      writeRegister(tools_[i].getID()[j], "Torque_Enable", (uint8_t)0);
-    }
-  }
-
   if (portHandler_ != nullptr)
   {
     portHandler_->closePort();
