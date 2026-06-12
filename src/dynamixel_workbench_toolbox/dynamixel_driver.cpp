@@ -18,7 +18,76 @@
 
 #include "../../include/dynamixel_workbench_toolbox/dynamixel_driver.h"
 
-DynamixelDriver::DynamixelDriver() : tools_cnt_(0), 
+#include <cctype>
+#include <cstdlib>
+#include <fcntl.h>
+#include <limits.h>
+#include <string>
+#include <sys/file.h>
+#include <unistd.h>
+
+namespace
+{
+
+std::string resolve_port_path(const char *port)
+{
+  char resolved_path[PATH_MAX];
+  if (realpath(port, resolved_path) != NULL)
+  {
+    return resolved_path;
+  }
+  return port;
+}
+
+std::string lock_path_for_port(const char *port)
+{
+  std::string sanitized;
+  const std::string resolved_port = resolve_port_path(port);
+  for (const char ch : resolved_port)
+  {
+    const unsigned char uch = static_cast<unsigned char>(ch);
+    sanitized.push_back(std::isalnum(uch) ? ch : '_');
+  }
+  return "/run/lock/dynamixel_workbench_toolbox" + sanitized + ".lock";
+}
+
+void release_port_lock(int *fd)
+{
+  if (*fd != -1)
+  {
+    close(*fd);
+    *fd = -1;
+  }
+}
+
+bool acquire_port_lock(const char *port, int *fd)
+{
+  if (*fd != -1)
+  {
+    return true;
+  }
+
+  const std::string lock_path = lock_path_for_port(port);
+  *fd = open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0666);
+  if (*fd == -1)
+  {
+    return false;
+  }
+
+  if (flock(*fd, LOCK_EX | LOCK_NB) == -1)
+  {
+    release_port_lock(fd);
+    return false;
+  }
+
+  return true;
+}
+
+}  // namespace
+
+DynamixelDriver::DynamixelDriver() : portHandler_(nullptr),
+                                    port_lock_fd_(-1),
+                                    tools_cnt_(0),
                                     sync_write_handler_cnt_(0), 
                                     sync_read_handler_cnt_(0),
                                     bulk_read_parameter_cnt_(0)
@@ -36,7 +105,11 @@ DynamixelDriver::~DynamixelDriver()
     }
   }
 
-  portHandler_->closePort();
+  if (portHandler_ != nullptr)
+  {
+    portHandler_->closePort();
+  }
+  release_port_lock(&port_lock_fd_);
 }
 
 void DynamixelDriver::initTools(void)
@@ -126,6 +199,12 @@ bool DynamixelDriver::begin(const char *device_name, uint32_t baud_rate, const c
 
 bool DynamixelDriver::setPortHandler(const char *device_name, const char **log)
 {
+  if (!acquire_port_lock(device_name, &port_lock_fd_))
+  {
+    if (log != NULL) *log = "[DynamixelDriver] Failed to lock the port!";
+    return false;
+  }
+
   portHandler_ = dynamixel::PortHandler::getPortHandler(device_name);
 
   if (portHandler_->openPort())
@@ -134,6 +213,7 @@ bool DynamixelDriver::setPortHandler(const char *device_name, const char **log)
     return true;
   }
 
+  release_port_lock(&port_lock_fd_);
   if (log != NULL) *log = "[DynamixelDriver] Failed to open the port!";
   return false;
 }

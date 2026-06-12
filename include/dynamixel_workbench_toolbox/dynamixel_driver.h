@@ -65,6 +65,7 @@ class DynamixelDriver
  private:
   dynamixel::PortHandler   *portHandler_;
   dynamixel::PacketHandler *packetHandler_;
+  int port_lock_fd_;
 
   SyncWriteHandler syncWriteHandler_[MAX_HANDLER_NUM];
   SyncReadHandler  syncReadHandler_[MAX_HANDLER_NUM];
